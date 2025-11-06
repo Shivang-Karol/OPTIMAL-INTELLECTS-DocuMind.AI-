@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>DocuMind LM - Document Analysis</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined"
+      rel="stylesheet"
+    />
+    <style>
+      .material-symbols-outlined {
+        font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+        font-size: 20px;
+      }
+      @keyframes pulse-dot {
+        0%,
+        100% {
+          opacity: 0.2;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+      .animate-pulse-dot-1 {
+        animation: pulse-dot 1.4s infinite;
+        animation-delay: 0s;
+      }
+      .animate-pulse-dot-2 {
+        animation: pulse-dot 1.4s infinite;
+        animation-delay: 0.2s;
+      }
+      .animate-pulse-dot-3 {
+        animation: pulse-dot 1.4s infinite;
+        animation-delay: 0.4s;
+      }
+      .chat-bubble {
+        transition: all 0.3s ease;
+      }
+      .chat-bubble:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+      }
+    </style>
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#000000",
+              secondary: "#ffffff",
+              "background-light": "#ffffff",
+              "background-dark": "#000000",
+              "text-light": "#000000",
+              "text-dark": "#ffffff",
+              "border-light": "#000000",
+              "border-dark": "#ffffff",
+              "card-light": "#ffffff",
+              "card-dark": "#000000",
+              "gray-light": "#f5f5f5",
+              "gray-dark": "#1a1a1a",
+              accent: "#333333",
+              "accent-dark": "#cccccc",
+            },
+            fontFamily: { display: ["Inter", "sans-serif"] },
+          },
+        },
+      };
+    </script>
+  </head>
+  <body
+    class="font-display bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark transition-colors duration-500"
+  >
+    <div class="relative flex h-screen w-full flex-col overflow-hidden">
+      <header
+        class="flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-3 shrink-0"
+      >
+        <div class="flex items-center gap-3">
+          <div class="size-6 text-primary dark:text-secondary">
+            <svg
+              fill="none"
+              viewbox="0 0 48 48"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M24 4C25.7818 14.2173 33.7827 22.2182 44 24C33.7827 25.7818 25.7818 33.7827 24 44C22.2182 33.7827 14.2173 25.7818 4 24C14.2173 22.2182 22.2182 14.2173 24 4Z"
+                fill="currentColor"
+              ></path>
+            </svg>
+          </div>
+          <h2 class="text-lg font-bold">DocuMind LM</h2>
+        </div>
+        <div class="flex gap-2">
+          <button
+            class="flex items-center rounded-lg h-10 px-4 hover:bg-gray-light dark:hover:bg-gray-dark"
+            id="login-register-button"
+          >
+            <span class="material-symbols-outlined mr-2">person</span>
+            <span class="text-sm font-medium" id="auth-button-text"
+              >Login/Register</span
+            >
+          </button>
+          <button
+            class="flex items-center rounded-lg h-10 px-4 hover:bg-gray-light dark:hover:bg-gray-dark"
+            id="upload-button"
+          >
+            <span class="material-symbols-outlined mr-2">upload_file</span>
+            <span class="text-sm font-medium">Upload Document</span>
+          </button>
+          <button
+            class="flex items-center rounded-lg h-10 w-10 hover:bg-gray-light dark:hover:bg-gray-dark"
+            onclick="toggleDarkMode()"
+          >
+            <span class="material-symbols-outlined">dark_mode</span>
+          </button>
+        </div>
+      </header>
+      <main class="flex h-full grow overflow-hidden">
+        <aside
+          class="w-[380px] shrink-0 border-r border-border-light dark:border-border-dark bg-card-light dark:bg-card-dark p-6 flex flex-col gap-6"
+        >
+          <div class="flex flex-col gap-2">
+            <p class="text-2xl font-bold" id="doc-title">
+              No Document Selected
+            </p>
+            <p
+              class="text-sm text-accent dark:text-accent-dark"
+              id="doc-filename"
+            >
+              Upload a document to start
+            </p>
+          </div>
+          <div
+            class="flex flex-col gap-3 rounded-lg border border-border-light dark:border-border-dark p-4 bg-gray-light dark:bg-gray-dark h-full overflow-y-auto"
+          >
+            <h3 class="text-base font-semibold mb-2">Chat History</h3>
+            <div class="flex flex-col gap-2" id="sessions-list">
+              <p class="text-sm text-accent dark:text-accent-dark">
+                No sessions yet
+              </p>
+            </div>
+          </div>
+        </aside>
+        <div class="flex flex-1 flex-col overflow-y-auto">
+          <div
+            class="sticky top-0 bg-background-light dark:bg-background-dark border-b border-border-light dark:border-border-dark p-4 flex justify-between items-center"
+          >
+            <h2 class="text-lg font-semibold">Document Analysis</h2>
+            <button
+              class="flex items-center gap-2 px-4 py-2 bg-primary dark:bg-secondary text-secondary dark:text-primary rounded-lg hover:bg-accent dark:hover:bg-accent-dark"
+              id="summarize-button"
+            >
+              <span class="material-symbols-outlined" style="font-size: 18px"
+                >summarize</span
+              >
+              <span class="text-sm font-medium">Summarize</span>
+            </button>
+          </div>
+          <div
+            class="flex-grow p-6 space-y-6 overflow-y-auto"
+            id="chat-container"
+          >
+            <div class="text-center text-accent dark:text-accent-dark py-10">
+              <p>Upload a document and start asking questions!</p>
+            </div>
+          </div>
+          <div
+            class="sticky bottom-0 bg-gradient-to-t from-background-light dark:from-background-dark to-transparent px-6 pb-6 pt-4"
+          >
+            <div class="relative">
+              <textarea
+                class="w-full resize-none rounded-xl border border-border-light dark:border-border-dark bg-card-light dark:bg-card-dark py-3 pl-4 pr-14 text-base placeholder:text-accent dark:placeholder:text-accent-dark focus:ring-2 focus:ring-primary dark:focus:ring-secondary"
+                placeholder="Ask a question about your document..."
+                rows="1"
+                id="chat-input"
+                disabled
+              ></textarea>
+              <button
+                class="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center justify-center size-8 rounded-lg bg-primary dark:bg-secondary text-secondary dark:text-primary hover:bg-accent dark:hover:bg-accent-dark"
+                id="send-button"
+                disabled
+              >
+                <span class="material-symbols-outlined" style="font-size: 20px"
+                  >arrow_upward</span
+                >
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const API_BASE_URL = "http://localhost:8000";
+      let currentSessionId = null;
+      let currentToken = null;
+
+      document.addEventListener("DOMContentLoaded", function () {
+        const chatContainer = document.getElementById("chat-container");
+        const chatInput = document.getElementById("chat-input");
+        const sendButton = document.getElementById("send-button");
+        const uploadButton = document.getElementById("upload-button");
+        const loginRegisterButton = document.getElementById(
+          "login-register-button"
+        );
+        const authButtonText = document.getElementById("auth-button-text");
+        const summarizeButton = document.getElementById("summarize-button");
+        const sessionsList = document.getElementById("sessions-list");
+
+        // Check if user is logged in
+        currentToken = localStorage.getItem("token");
+        const user = JSON.parse(localStorage.getItem("user") || "null");
+
+        if (currentToken && user) {
+          authButtonText.textContent = user.username || user.email;
+          loginRegisterButton.onclick = logout;
+          loadSessions();
+        } else {
+          loginRegisterButton.onclick = () => (window.location.href = "/login");
+        }
+
+        function toggleDarkMode() {
+          document.documentElement.classList.toggle("dark");
+          localStorage.setItem(
+            "darkMode",
+            document.documentElement.classList.contains("dark")
+          );
+        }
+        window.toggleDarkMode = toggleDarkMode;
+
+        if (localStorage.getItem("darkMode") === "true") {
+          document.documentElement.classList.add("dark");
+        }
+
+        uploadButton.addEventListener("click", () => {
+          if (!currentToken) {
+            alert("Please login first");
+            window.location.href = "/login";
+            return;
+          }
+          window.location.href = "/upload";
+        });
+
+        // Check if file was just uploaded
+        const uploadedFile = JSON.parse(
+          localStorage.getItem("uploadedFile") || "null"
+        );
+        if (uploadedFile && currentToken) {
+          createSessionForUploadedFile(uploadedFile);
+          localStorage.removeItem("uploadedFile");
+        }
+
+        async function createSessionForUploadedFile(fileInfo) {
+          try {
+            const response = await fetch(
+              `${API_BASE_URL}/api/v1/sessions/create`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${currentToken}`,
+                },
+                body: JSON.stringify({
+                  title: fileInfo.filename,
+                  document_id: fileInfo.file_id,
+                  document_url: fileInfo.file_path,
+                }),
+              }
+            );
+
+            if (!response.ok) throw new Error("Failed to create session");
+
+            const data = await response.json();
+            currentSessionId = data.session_id;
+            document.getElementById("doc-title").textContent =
+              fileInfo.filename;
+            document.getElementById("doc-filename").textContent =
+              fileInfo.file_path;
+            chatInput.disabled = false;
+            sendButton.disabled = false;
+
+            addWelcomeMessage();
+            loadSessions();
+          } catch (error) {
+            console.error("Session creation error:", error);
+            alert("Failed to create session: " + error.message);
+          }
+        }
+
+        async function loadSessions() {
+          try {
+            const response = await fetch(
+              `${API_BASE_URL}/api/v1/sessions/list`,
+              {
+                headers: { Authorization: `Bearer ${currentToken}` },
+              }
+            );
+
+            if (!response.ok) throw new Error("Failed to load sessions");
+
+            const data = await response.json();
+            displaySessions(data.sessions || []);
+          } catch (error) {
+            console.error("Load sessions error:", error);
+          }
+        }
+
+        function displaySessions(sessions) {
+          if (sessions.length === 0) {
+            sessionsList.innerHTML =
+              '<p class="text-sm text-accent dark:text-accent-dark">No sessions yet</p>';
+            return;
+          }
+
+          sessionsList.innerHTML = sessions
+            .map((session) => {
+              const date = new Date(session.created_at);
+              const formattedDate = date.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              });
+              const formattedTime = date.toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+
+              return `
+            <div class="p-3 rounded cursor-pointer hover:bg-background-light dark:hover:bg-background-dark" onclick="loadSession('${
+              session.id
+            }')">
+                <p class="text-sm font-medium truncate">${
+                  session.title || "Untitled Document"
+                }</p>
+                <p class="text-xs text-accent dark:text-accent-dark">${formattedDate} at ${formattedTime}</p>
+            </div>
+        `;
+            })
+            .join("");
+        }
+
+        window.loadSession = async function (sessionId) {
+          currentSessionId = sessionId;
+          chatContainer.innerHTML = "";
+          chatInput.disabled = false;
+          sendButton.disabled = false;
+
+          try {
+            const response = await fetch(
+              `${API_BASE_URL}/api/v1/sessions/${sessionId}/messages`,
+              {
+                headers: { Authorization: `Bearer ${currentToken}` },
+              }
+            );
+
+            if (!response.ok) throw new Error("Failed to load messages");
+
+            const data = await response.json();
+            data.messages.forEach((msg) => {
+              addMessage(msg.content, msg.type);
+            });
+          } catch (error) {
+            console.error("Load messages error:", error);
+          }
+        };
+
+        function addWelcomeMessage() {
+          addMessage(
+            "Welcome! I've analyzed your document. What would you like to know?",
+            "bot"
+          );
+        }
+
+        function addMessage(text, sender) {
+          const isUser = sender === "user";
+          const messageDiv = document.createElement("div");
+          messageDiv.className = `flex items-end gap-3 ${
+            isUser ? "justify-end" : ""
+          }`;
+
+          messageDiv.innerHTML = `
+            ${
+              !isUser
+                ? `
+            <div class="bg-gray-light dark:bg-gray-dark rounded-full w-8 h-8 flex items-center justify-center shrink-0">
+                <span class="material-symbols-outlined text-sm">smart_toy</span>
+            </div>`
+                : ""
+            }
+            <div class="flex flex-col gap-1 ${
+              isUser ? "items-end" : "items-start"
+            }">
+                <p class="text-sm text-accent dark:text-accent-dark">${
+                  isUser ? "You" : "DocuMind LM"
+                }</p>
+                <div class="max-w-[500px] rounded-2xl px-4 py-3 ${
+                  isUser
+                    ? "bg-primary dark:bg-secondary text-secondary dark:text-primary"
+                    : "bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark"
+                } chat-bubble">
+                    <p class="text-base whitespace-pre-wrap">${text}</p>
+                </div>
+            </div>
+            ${
+              isUser
+                ? `
+            <div class="bg-center bg-cover rounded-full w-8 h-8 border border-border-light dark:border-border-dark shrink-0" style="background-image: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23333%22/></svg>');"></div>`
+                : ""
+            }
+        `;
+
+          chatContainer.appendChild(messageDiv);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function showTypingIndicator() {
+          const typingDiv = document.createElement("div");
+          typingDiv.id = "typing-indicator";
+          typingDiv.className = "flex items-end gap-3";
+          typingDiv.innerHTML = `
+            <div class="bg-gray-light dark:bg-gray-dark rounded-full w-8 h-8 flex items-center justify-center shrink-0">
+                <span class="material-symbols-outlined text-sm">smart_toy</span>
+            </div>
+            <div class="flex max-w-[500px] rounded-2xl px-4 py-3 bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark">
+                <div class="flex items-center space-x-1">
+                    <div class="size-2 bg-accent dark:bg-accent-dark rounded-full animate-pulse-dot-1"></div>
+                    <div class="size-2 bg-accent dark:bg-accent-dark rounded-full animate-pulse-dot-2"></div>
+                    <div class="size-2 bg-accent dark:bg-accent-dark rounded-full animate-pulse-dot-3"></div>
+                </div>
+            </div>
+        `;
+          chatContainer.appendChild(typingDiv);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+          const typing = document.getElementById("typing-indicator");
+          if (typing) typing.remove();
+        }
+
+        async function sendMessage() {
+          const message = chatInput.value.trim();
+          if (!message || !currentSessionId) return;
+
+          addMessage(message, "user");
+          chatInput.value = "";
+          showTypingIndicator();
+
+          try {
+            const formData = new FormData();
+            formData.append("question", message);
+            formData.append("session_id", currentSessionId);
+
+            const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${currentToken}` },
+              body: formData,
+            });
+
+            if (!response.ok) throw new Error("Failed to send message");
+
+            const data = await response.json();
+            hideTypingIndicator();
+            addMessage(data.answer, "bot");
+          } catch (error) {
+            hideTypingIndicator();
+            addMessage("Sorry, an error occurred. Please try again.", "bot");
+            console.error("Send message error:", error);
+          }
+        }
+
+        sendButton.addEventListener("click", sendMessage);
+        chatInput.addEventListener("keypress", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+          }
+        });
+
+        summarizeButton.addEventListener("click", async () => {
+          if (!currentSessionId) {
+            alert("Please select a session first");
+            return;
+          }
+
+          summarizeButton.disabled = true;
+          summarizeButton.innerHTML =
+            '<span class="material-symbols-outlined animate-spin">refresh</span><span>Summarizing...</span>';
+
+          try {
+            const response = await fetch(
+              `${API_BASE_URL}/api/v1/hackrx/summarize`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${currentToken}`,
+                },
+                body: JSON.stringify({
+                  session_id: currentSessionId,
+                  use_granite: true,
+                }),
+              }
+            );
+
+            if (!response.ok) throw new Error("Failed to summarize");
+
+            const data = await response.json();
+            addMessage(data.summary, "bot");
+          } catch (error) {
+            alert("Summarization failed: " + error.message);
+            console.error("Summarize error:", error);
+          } finally {
+            summarizeButton.disabled = false;
+            summarizeButton.innerHTML =
+              '<span class="material-symbols-outlined">summarize</span><span>Summarize</span>';
+          }
+        });
+
+        function logout() {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          localStorage.removeItem("isLoggedIn");
+          window.location.reload();
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -32,11 +32,11 @@ import httpx          # Async HTTP client for API calls and PDF downloads
 import numpy as np    # Numerical operations on embeddings
 
 from dotenv import load_dotenv                # Load environment variables from .env file
-from fastapi import FastAPI, Header, UploadFile, File, Form, HTTPException, Depends, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, Header, UploadFile, File, Form, HTTPException, Depends
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware  # CORS support for frontend
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.staticfiles import StaticFiles   # Serve static files (CSS, JS, images)
-from fastapi.templating import Jinja2Templates # Template rendering for HTML pages
 from openai import AsyncAzureOpenAI           # Azure OpenAI client for embeddings and chat
 from pydantic import BaseModel                # Data validation for API request/response
 from pymongo import MongoClient               # MongoDB client for logging
@@ -51,10 +51,17 @@ from bs4 import BeautifulSoup                 # HTML parsing for web scraping (s
 load_dotenv()           # Load .env file containing API keys and configuration
 app = FastAPI()         # Initialize FastAPI application for REST endpoints
 
-# Configure templates and static files
-templates = Jinja2Templates(directory="templates")
-# Uncomment below if you have a static folder for CSS/JS/images
-# app.mount("/static", StaticFiles(directory="static"), name="static")
+# ============================================================================
+# CORS CONFIGURATION - Allow frontend to access backend
+# ============================================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # JWT Configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
@@ -203,23 +210,30 @@ def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 # ============================================================================
-# FRONTEND ROUTES - Serve HTML pages
+# STATIC FILES & ROOT ENDPOINT
 # ============================================================================
 
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    """Render home page"""
-    return templates.TemplateResponse("Index.html", {"request": request})
+@app.get("/")
+async def root():
+    """Serve the main page"""
+    return FileResponse("static/Index.html")
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    """Render login/register page"""
-    return templates.TemplateResponse("LoginRegister.html", {"request": request})
+@app.get("/login")
+async def login_page():
+    """Serve the login page"""
+    return FileResponse("static/LoginRegister.html")
 
-@app.get("/upload", response_class=HTMLResponse)
-async def upload_page(request: Request):
-    """Render PDF upload page"""
-    return templates.TemplateResponse("pdf upload.html", {"request": request})
+@app.get("/upload")
+async def upload_page():
+    """Serve the upload page"""
+    return FileResponse("static/pdf upload.html")
+
+# Mount static files AFTER defining routes
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+except RuntimeError:
+    # Static directory doesn't exist yet, skip mounting
+    pass
 
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
@@ -456,9 +470,8 @@ async def upload_pdf(file: UploadFile = File(...), user = Depends(get_current_us
         content = await file.read()
         print(f"[UPLOAD] File read in {time.time() - t0:.2f}s ({len(content)} bytes)")
 
-        if len(content) > 100 * 1024 * 1024:  # 100MB limit
-            raise HTTPException(status_code=400, detail="File too large. Maximum size is 100MB")
-
+        # No file size limit
+        
         # Generate unique identifier
         file_id = f"upload_{int(time.time())}_{user['username']}_{file.filename}"
         
@@ -601,11 +614,27 @@ async def chat_endpoint(
             print(f"[AGENT 3] Chunking: {time.time() - t_chunk:.2f}s")
             print(f"[AGENT 3] Created {len(chunks)} chunks")
             
+            # Check if we have any chunks
+            if len(chunks) == 0:
+                print(f"[AGENT 3] ERROR: Document too short or empty. Extracted text: '{text[:100]}'")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Document is too short to process. Please upload a document with more content. (Extracted only {len(text)} characters)"
+                )
+            
             # Embed
             t_embed = time.time()
             chunk_embeddings = await get_embeddings(chunks, model=embedding_deployment)
             print(f"[AGENT 3] Embedding generation: {time.time() - t_embed:.2f}s")
             print(f"[AGENT 3] Generated {len(chunk_embeddings)} embeddings")
+            
+            # Verify embeddings are valid
+            if len(chunk_embeddings) == 0 or chunk_embeddings.shape[0] == 0:
+                print(f"[AGENT 3] ERROR: Failed to generate embeddings")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to generate embeddings for document chunks"
+                )
             
             # Create FAISS index
             t_faiss = time.time()
@@ -624,11 +653,24 @@ async def chat_endpoint(
         expanded_questions = expand_question_semantics(understood_question)
         print(f"[AGENT 3] Expanded question into {len(expanded_questions)} variations")
         
+        # Detect if user wants detailed/in-depth explanation
+        detail_keywords = ['detail', 'detailed', 'depth', 'in-depth', 'comprehensive', 'thorough', 'complete', 'full', 'extensive', 'elaborate']
+        wants_detail = any(keyword in question.lower() or keyword in understood_question.lower() for keyword in detail_keywords)
+        
+        # Adjust chunk retrieval based on detail level requested
+        if wants_detail:
+            k_chunks = 40  # More chunks for detailed explanations
+            top_k_rerank = 35
+            print(f"[AGENT 3] Detailed explanation requested - retrieving {k_chunks} chunks")
+        else:
+            k_chunks = 21  # Standard chunk count
+            top_k_rerank = 21
+        
         question_embeddings = await get_embeddings(expanded_questions, model=embedding_deployment)
         avg_embedding = np.mean(question_embeddings, axis=0, keepdims=True)
         
-        retrieved_chunks = search_faiss(avg_embedding, faiss_index, chunks, k=21)
-        top_chunks = rerank_chunks_by_keyword_overlap(understood_question, retrieved_chunks, top_k=21)
+        retrieved_chunks = search_faiss(avg_embedding, faiss_index, chunks, k=k_chunks)
+        top_chunks = rerank_chunks_by_keyword_overlap(understood_question, retrieved_chunks, top_k=top_k_rerank)
         print(f"[AGENT 3] Semantic search & reranking: {time.time() - t_search:.2f}s")
         print(f"[AGENT 3] Retrieved {len(top_chunks)} most relevant chunks")
         
@@ -832,52 +874,59 @@ async def answer_generation_agent(
             for msg in chat_history[-6:]
         ])
     
-    prompt = f"""You are an AI Assistant specializing in document analysis and question answering. You have access to:
-1. The current document's relevant sections
-2. Previous conversation history (if applicable)
+    prompt = f"""You are a document Q&A assistant. Answer questions using ONLY the document content provided below.
 
-Your task is to provide accurate, well-formatted, and contextually relevant answers.
+🎯 CRITICAL RULES:
 
-FORMATTING GUIDELINES:
-1. Use **markdown formatting** for better readability
-2. Use **bold** for important terms or concepts
-3. Use numbered lists (1., 2., 3.) for sequential information
-4. Use bullet points (-, *) for non-sequential lists
-5. Use ```sql or ```python code blocks for queries or code examples
-6. Use `inline code` for short code snippets, table names, or column names
-7. Break long paragraphs into smaller ones for readability
+1. **Use ONLY information from the DOCUMENT CONTEXT below** - never add external knowledge
+2. **Use ALL the relevant information provided in the context** - don't hold back
+3. **If a topic is mentioned in the document, answer about it using whatever content is available**
+4. **Do NOT refuse to answer if the topic appears in the document** - share what's there
+5. **Do NOT add facts, definitions, or explanations from outside the document**
 
-CONTENT GUIDELINES:
-1. **Primary Source**: Always prioritize information from the document context
-2. **Conversation Awareness**: If this is a follow-up question, reference previous answers naturally
-3. **Clarity**: Be concise but comprehensive
-4. **Keywords**: Use terminology from the document when possible
-5. **Semantic Understanding**: Interpret related concepts intelligently
-6. **Examples**: When explaining SQL queries or code, provide formatted examples
+📋 HOW TO RESPOND:
 
-INTENT: {intent}
-- If "follow_up": Connect to previous answers
-- If "clarification": Expand on previous information with examples
-- If "comparison": Use tables or lists to compare
-- If "factual_query": Provide direct, well-structured information
-- If "summarization": Use bullet points and sections
+If the document has content about the topic:
+→ Provide a COMPREHENSIVE answer using all available information from the context
+→ Structure it clearly with bullet points, sections, or numbered lists
+→ Include all relevant details, examples, and explanations found in the document
+
+If the user asks for "detailed" or "in-depth" explanation:
+→ Use MORE of the provided context to give a thorough response
+→ Break down complex topics into multiple points
+→ Include all subtopics and related information
+
+If the document only mentions the topic as a heading/title with no details:
+→ Say: "The document mentions '[topic]' as a section/topic, but doesn't provide detailed content about it in the portions I can see."
+
+If the topic is NOT in the document at all:
+→ Say: "I cannot find '[topic]' mentioned in this document."
+
+ FORMAT:
+- Use **bold** for key terms
+- Use bullet points (-) for lists
+- Use numbered lists for sequential information
+- Break long content into sections with subheadings
 
 ---
-DOCUMENT CONTEXT:
+DOCUMENT CONTEXT (Your ONLY source - {len(document_context)} chunks provided):
 {doc_context_text}
 {history_context}
 ---
 
-ORIGINAL QUESTION: {original_question}
-UNDERSTOOD AS: {understood_question}
+QUESTION: {original_question}
+INTENT: {intent}
 
-Provide a clear, well-formatted answer using markdown:
+Provide a comprehensive answer using ALL relevant information from the document context above. Do not add external knowledge:
 """
     
     response = await client.chat.completions.create(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=2000,  # Increased for formatted responses
+        messages=[
+            {"role": "system", "content": "You are a document Q&A assistant. You answer questions using ONLY the information provided in the document context. Never use external knowledge or facts from your training data. If the document mentions a topic, explain it using only what the document says."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3,  # Lower temperature to reduce hallucination and stay focused on document
+        max_tokens=2000,
         model=chat_deployment
     )
     
@@ -1610,13 +1659,23 @@ async def summarize_session(request: SummarizeRequest):
         }
     """
     
-    # Retrieve chat history
-    history = list(chat_sessions.find(
-        {"session_id": request.session_id},
-        {"_id": 0, "question": 1, "answer": 1, "timestamp": 1}
-    ).sort("timestamp", 1))
+    print(f"[SUMMARIZE] Request to summarize session: {request.session_id}")
+    
+    # Retrieve chat history from the correct collection (messages_collection)
+    history = list(messages_collection.find(
+        {"session_id": request.session_id}
+    ).sort("created_at", 1))
+    
+    print(f"[SUMMARIZE] Found {len(history)} messages in session")
     
     if not history:
+        # Try to find session info
+        session_info = sessions_collection.find_one({"_id": ObjectId(request.session_id)})
+        if session_info:
+            print(f"[SUMMARIZE] Session exists but has no messages yet")
+        else:
+            print(f"[SUMMARIZE] Session not found in database")
+        
         return {
             "session_id": request.session_id,
             "summary": "No conversation found for this session.",
@@ -1627,20 +1686,38 @@ async def summarize_session(request: SummarizeRequest):
     # Format conversation for summarization
     conversation_text = "Conversation History:\n\n"
     for i, item in enumerate(history, 1):
-        conversation_text += f"Q{i}: {item.get('question', 'N/A')}\n"
-        conversation_text += f"A{i}: {item.get('answer', 'N/A')}\n\n"
+        msg_type = item.get('type', 'unknown')
+        content = item.get('content', 'N/A')
+        if msg_type == 'user':
+            conversation_text += f"User: {content}\n"
+        elif msg_type == 'bot':
+            conversation_text += f"Assistant: {content}\n\n"
     
     # Choose model based on request and availability
     use_granite = request.use_granite and USE_GRANITE
     
-    if use_granite:
-        # Use IBM Granite model for summarization
-        summary, key_points = await summarize_with_granite(conversation_text)
-        model_used = "ibm-granite"
-    else:
-        # Fallback to Azure OpenAI GPT
+    try:
+        if use_granite:
+            # Use IBM Granite model for summarization (with 30s timeout)
+            print(f"[SUMMARIZE] Using IBM Granite model...")
+            summary, key_points = await asyncio.wait_for(
+                summarize_with_granite(conversation_text),
+                timeout=30.0  # 30 second timeout
+            )
+            model_used = "ibm-granite"
+        else:
+            # Use Azure OpenAI GPT
+            print(f"[SUMMARIZE] Using Azure OpenAI GPT...")
+            summary, key_points = await summarize_with_gpt(conversation_text)
+            model_used = "gpt-4o-mini"
+    except asyncio.TimeoutError:
+        print(f"[SUMMARIZE] Granite timed out, falling back to GPT...")
         summary, key_points = await summarize_with_gpt(conversation_text)
-        model_used = "gpt-4o-mini"
+        model_used = "gpt-4o-mini (granite timeout)"
+    except Exception as e:
+        print(f"[SUMMARIZE] Error with Granite: {str(e)}, falling back to GPT...")
+        summary, key_points = await summarize_with_gpt(conversation_text)
+        model_used = f"gpt-4o-mini (granite error)"
     
     return {
         "session_id": request.session_id,
