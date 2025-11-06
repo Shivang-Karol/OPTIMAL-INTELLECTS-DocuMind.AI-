@@ -1,32 +1,35 @@
-# Web server
-fastapi
-uvicorn
+# ============================================================================
+# DocuMind AI - RAG-Based Document Q&A System
+# ============================================================================
 
-# HTTP client
-httpx
+# Web Framework
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.20
 
-# PDF processing
-PyMuPDF
-pdfplumber
-beautifulsoup4
+# HTTP Client
+httpx==0.28.1
 
-# AI and Machine Learning
-openai
-tiktoken
-faiss-cpu
-numpy
-scikit-learn
-pinecone
-pydantic
+# PDF Processing
+PyMuPDF==1.26.5
 
-# Environment variables
-python-dotenv
+# AI & Machine Learning
+openai==1.59.6
+tiktoken==0.8.0
+faiss-cpu==1.9.0.post1
+numpy==2.2.1
+scikit-learn==1.6.1
+
+# Data Validation
+pydantic==2.10.5
+
+# Environment Variables
+python-dotenv==1.0.1
 
 # Database
-pymongo
+pymongo==4.11.0
 
-# IBM watsonx.ai (for Granite model summarization)
-# Uncomment if using IBM Granite model
-# ibm-watsonx-ai>=0.2.0
-
+# Authentication
+PyJWT==2.10.1
+bcrypt==4.2.1
 

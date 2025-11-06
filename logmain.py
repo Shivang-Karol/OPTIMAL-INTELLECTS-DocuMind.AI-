@@ -108,22 +108,49 @@ USE_GRANITE = os.getenv("USE_GRANITE", "false").lower() == "true"     # Enable/d
 #   - CheckRequest: Legacy logs (kept for backward compatibility)
 
 mongo_uri = os.getenv("MONGO_URI")          # MongoDB connection string from environment
-mongo_client = MongoClient(mongo_uri)        # Create MongoDB client
-mongo_client.admin.command('ping')           # Test connection to ensure MongoDB is reachable
-db = mongo_client["hackrx_logs"]             # Select database
 
-# Collections
-users_collection = db["users"]
-sessions_collection = db["chat_sessions"]
-messages_collection = db["chat_messages"]
-chat_sessions = db["ChatSessions"]           # Legacy collection for backward compatibility
-collection = db["CheckRequest"]              # Legacy collection for backward compatibility
-
-# Create indexes for better query performance
-chat_sessions.create_index("session_id")
-chat_sessions.create_index([("session_id", 1), ("timestamp", 1)])
-sessions_collection.create_index("user_id")
-messages_collection.create_index("session_id")
+# Try to connect to MongoDB with error handling
+try:
+    mongo_client = MongoClient(
+        mongo_uri,
+        serverSelectionTimeoutMS=5000,  # 5 second timeout
+        connectTimeoutMS=5000
+    )
+    mongo_client.admin.command('ping')           # Test connection to ensure MongoDB is reachable
+    db = mongo_client["hackrx_logs"]             # Select database
+    
+    # Collections
+    users_collection = db["users"]
+    sessions_collection = db["chat_sessions"]
+    messages_collection = db["chat_messages"]
+    chat_sessions = db["ChatSessions"]           # Legacy collection for backward compatibility
+    collection = db["CheckRequest"]              # Legacy collection for backward compatibility
+    
+    # Create indexes for better query performance
+    chat_sessions.create_index("session_id")
+    chat_sessions.create_index([("session_id", 1), ("timestamp", 1)])
+    sessions_collection.create_index("user_id")
+    messages_collection.create_index("session_id")
+    
+    print("[MongoDB] ✅ Connected successfully!")
+    
+except Exception as e:
+    print(f"[MongoDB] ⚠️ Connection failed: {str(e)}")
+    print("[MongoDB] Server will continue without database features")
+    print("[MongoDB] Please check:")
+    print("  1. Your internet connection")
+    print("  2. MongoDB Atlas cluster is running")
+    print("  3. MONGO_URI in .env file is correct")
+    print("  4. Your IP is whitelisted in MongoDB Atlas")
+    
+    # Create dummy collections to prevent errors
+    mongo_client = None
+    db = None
+    users_collection = None
+    sessions_collection = None
+    messages_collection = None
+    chat_sessions = None
+    collection = None
 
 # ============================================================================
 # PYDANTIC MODELS - Request/Response validation
@@ -245,39 +272,52 @@ async def register(user_data: UserRegister):
     start_time = time.time()
     print(f"\n[AUTH] Registration attempt for: {user_data.email}")
     
-    # Check if user exists
-    if users_collection.find_one({"email": user_data.email}):
-        raise HTTPException(status_code=400, detail="Email already registered")
+    # Check if MongoDB is connected
+    if users_collection is None:
+        raise HTTPException(
+            status_code=503, 
+            detail="Database is currently unavailable. Please contact administrator or try again later."
+        )
     
-    if users_collection.find_one({"username": user_data.username}):
-        raise HTTPException(status_code=400, detail="Username already taken")
-    
-    # Create user
-    user_doc = {
-        "username": user_data.username,
-        "email": user_data.email,
-        "password": hash_password(user_data.password),
-        "created_at": datetime.utcnow(),
-        "last_login": datetime.utcnow()
-    }
-    
-    result = users_collection.insert_one(user_doc)
-    user_id = str(result.inserted_id)
-    
-    # Create JWT token
-    token = create_jwt_token(user_id, user_data.email)
-    
-    print(f"[AUTH] User registered successfully in {time.time() - start_time:.2f}s")
-    
-    return {
-        "success": True,
-        "token": token,
-        "user": {
-            "id": user_id,
+    try:
+        # Check if user exists
+        if users_collection.find_one({"email": user_data.email}):
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        if users_collection.find_one({"username": user_data.username}):
+            raise HTTPException(status_code=400, detail="Username already taken")
+        
+        # Create user
+        user_doc = {
             "username": user_data.username,
-            "email": user_data.email
+            "email": user_data.email,
+            "password": hash_password(user_data.password),
+            "created_at": datetime.utcnow(),
+            "last_login": datetime.utcnow()
         }
-    }
+        
+        result = users_collection.insert_one(user_doc)
+        user_id = str(result.inserted_id)
+        
+        # Create JWT token
+        token = create_jwt_token(user_id, user_data.email)
+        
+        print(f"[AUTH] User registered successfully in {time.time() - start_time:.2f}s")
+        
+        return {
+            "success": True,
+            "token": token,
+            "user": {
+                "id": user_id,
+                "username": user_data.username,
+                "email": user_data.email
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUTH] Registration error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
 
 @app.post("/api/v1/auth/login")
 async def login(credentials: UserLogin):
@@ -285,31 +325,44 @@ async def login(credentials: UserLogin):
     start_time = time.time()
     print(f"\n[AUTH] Login attempt for: {credentials.email}")
     
-    # Find user
-    user = users_collection.find_one({"email": credentials.email})
-    if not user or not verify_password(credentials.password, user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Check if MongoDB is connected
+    if users_collection is None:
+        raise HTTPException(
+            status_code=503, 
+            detail="Database is currently unavailable. Please contact administrator or try again later."
+        )
     
-    # Update last login
-    users_collection.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"last_login": datetime.utcnow()}}
-    )
+    try:
+        # Find user
+        user = users_collection.find_one({"email": credentials.email})
+        if not user or not verify_password(credentials.password, user["password"]):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    # Create JWT token
-    token = create_jwt_token(str(user["_id"]), user["email"])
-    
-    print(f"[AUTH] Login successful in {time.time() - start_time:.2f}s")
-    
-    return {
-        "success": True,
-        "token": token,
-        "user": {
-            "id": str(user["_id"]),
-            "username": user["username"],
-            "email": user["email"]
+        # Update last login
+        users_collection.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"last_login": datetime.utcnow()}}
+        )
+        
+        # Create JWT token
+        token = create_jwt_token(str(user["_id"]), user["email"])
+        
+        print(f"[AUTH] Login successful in {time.time() - start_time:.2f}s")
+        
+        return {
+            "success": True,
+            "token": token,
+            "user": {
+                "id": str(user["_id"]),
+                "username": user["username"],
+                "email": user["email"]
+            }
         }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUTH] Login error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 @app.get("/api/v1/auth/me")
 async def get_me(user = Depends(get_current_user)):
