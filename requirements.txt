@@ -1,0 +1,32 @@
+# Web server
+fastapi
+uvicorn
+
+# HTTP client
+httpx
+
+# PDF processing
+PyMuPDF
+pdfplumber
+beautifulsoup4
+
+# AI and Machine Learning
+openai
+tiktoken
+faiss-cpu
+numpy
+scikit-learn
+pinecone
+pydantic
+
+# Environment variables
+python-dotenv
+
+# Database
+pymongo
+
+# IBM watsonx.ai (for Granite model summarization)
+# Uncomment if using IBM Granite model
+# ibm-watsonx-ai>=0.2.0
+
+
