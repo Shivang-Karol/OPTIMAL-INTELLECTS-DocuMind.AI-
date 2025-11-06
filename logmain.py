@@ -32,9 +32,11 @@ import httpx          # Async HTTP client for API calls and PDF downloads
 import numpy as np    # Numerical operations on embeddings
 
 from dotenv import load_dotenv                # Load environment variables from .env file
-from fastapi import FastAPI, Header, UploadFile, File, Form, HTTPException, Depends
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Header, UploadFile, File, Form, HTTPException, Depends, Request
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles   # Serve static files (CSS, JS, images)
+from fastapi.templating import Jinja2Templates # Template rendering for HTML pages
 from openai import AsyncAzureOpenAI           # Azure OpenAI client for embeddings and chat
 from pydantic import BaseModel                # Data validation for API request/response
 from pymongo import MongoClient               # MongoDB client for logging
@@ -48,6 +50,11 @@ from bs4 import BeautifulSoup                 # HTML parsing for web scraping (s
 
 load_dotenv()           # Load .env file containing API keys and configuration
 app = FastAPI()         # Initialize FastAPI application for REST endpoints
+
+# Configure templates and static files
+templates = Jinja2Templates(directory="templates")
+# Uncomment below if you have a static folder for CSS/JS/images
+# app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # JWT Configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
@@ -194,6 +201,25 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     """Verify password against hash"""
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+# ============================================================================
+# FRONTEND ROUTES - Serve HTML pages
+# ============================================================================
+
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    """Render home page"""
+    return templates.TemplateResponse("Index.html", {"request": request})
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Render login/register page"""
+    return templates.TemplateResponse("LoginRegister.html", {"request": request})
+
+@app.get("/upload", response_class=HTMLResponse)
+async def upload_page(request: Request):
+    """Render PDF upload page"""
+    return templates.TemplateResponse("pdf upload.html", {"request": request})
 
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
